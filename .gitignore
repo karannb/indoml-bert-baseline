@@ -1,0 +1,12 @@
+# models
+bert-*/
+
+# data and logs
+data/
+logs/
+
+# local runner file
+local.sh
+
+# temp files
+temp*
