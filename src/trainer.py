@@ -17,7 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = '12345'
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -57,7 +57,8 @@ class Trainer:
             sampler=DistributedSampler(val_dataset) if self.ddp else None
         )
         self.test_dataloader = ReviewsDataLoader(
-            test_dataset, batch_size=8, shuffle=False
+            test_dataset, batch_size=8, shuffle=False,
+            sampler=DistributedSampler(test_dataset) if self.ddp else None
         )
         # used for creating final predictions
         self.idx2out = train_dataset.idx2out
@@ -178,8 +179,12 @@ class Trainer:
             for batch in tqdm(self.val_dataloader, total=len(self.val_dataloader)):
                 outputs, loss = self.eval_step(batch)
                 val_outputs.append(outputs)
-                val_targets.append(batch["output"])
+                val_targets.append(batch["output"].to(self.device))
 
+            # concatenate the outputs and targets
+            val_outputs = torch.cat(val_outputs)
+            val_targets = torch.cat(val_targets)
+            
             if self.ddp:
                 # Prepare tensors for gathering
                 gathered_outputs = [torch.zeros_like(val_outputs) for _ in range(dist.get_world_size())]
@@ -216,8 +221,12 @@ class Trainer:
                 )
 
         if best_model is not None:
-            self.lm.load_state_dict(best_model[0])
-            self.head.load_state_dict(best_model[1])
+            if self.ddp:
+                self.lm.module.load_state_dict(best_model[0])
+                self.head.module.load_state_dict(best_model[1])
+            else:
+                self.lm.load_state_dict(best_model[0])
+                self.head.load_state_dict(best_model[1])
 
     @torch.no_grad()
     def test(self):
@@ -231,12 +240,16 @@ class Trainer:
         for batch in tqdm(self.test_dataloader, total=len(self.test_dataloader)):
             outputs, _ = self.eval_step(batch, final_test=True)
             test_outputs.append(outputs)
-            test_ids.append(batch["ids"])
+            test_ids.append(batch["ids"].to(self.device))
+            
+        # concatenate the outputs and targets
+        test_outputs = torch.cat(test_outputs)
+        test_ids = torch.cat(test_ids)
 
         if self.ddp:
             # Prepare tensors for gathering
-            gathered_outputs = [torch.zeros(len(test_outputs)) for _ in range(dist.get_world_size())]
-            gathered_ids = [torch.zeros(len(test_ids)) for _ in range(dist.get_world_size())]
+            gathered_outputs = [torch.zeros_like(test_outputs) for _ in range(dist.get_world_size())]
+            gathered_ids = [torch.zeros_like(test_ids) for _ in range(dist.get_world_size())]
             
             # Gather tensors from all processes
             dist.all_gather(gathered_outputs, test_outputs)
@@ -256,7 +269,7 @@ class Trainer:
         if ((self.ddp and self.device == 0) or not self.ddp):
             
             print("Saving the final predictions for submission...")
-            if not os.path.exists("outputs/results.json"):
+            if not os.path.exists(f"outputs/results_{self.output}.json"):
                 file = []                    
                 for test_id, test_out in zip(test_ids, test_outputs):
                     cur_out = {
@@ -310,7 +323,7 @@ if __name__ == "__main__":
     world_size = torch.cuda.device_count()
     # DDP check.
     if world_size > 1:
-        print(f"Running on {world_size} GPUs")
+        print(f"Running on {world_size} GPUs.")
         mp.spawn(DDP_wrapper, args=(world_size, args.output, args.debug), nprocs=world_size)
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
