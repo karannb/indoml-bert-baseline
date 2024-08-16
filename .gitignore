@@ -8,5 +8,10 @@ logs/
 # local runner file
 local.sh
 
-# temp files
+# caches and temp files
+__pycache__/
 temp*
+
+# results
+*.predict
+results.json

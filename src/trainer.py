@@ -1,9 +1,10 @@
+import json
 import torch
 from tqdm import tqdm
 from argparse import ArgumentParser
 from transformers import BertTokenizerFast, BertForSequenceClassification
 
-from dataset import AmznReviewsDataset, AmznReviewsDataLoader
+from dataset import ReviewsDataset, ReviewsDataLoader
 from evaluate import get_accuracy, get_precision, get_recall, get_f1
 
 # distributed setup
@@ -28,42 +29,44 @@ def cleanup():
 
 class Trainer:
 
-    def __init__(self, data_dir, device, output="details_Brand", learning_rate=3e-3):
+    def __init__(self, data_dir, device, output="details_Brand", trim=False, learning_rate=3e-3):
 
         # first fix device as it decides the distributed setup
         self.device = device
         print(f"Using device: {self.device}")
         self.ddp = False
         if isinstance(self.device, int): # if it's ddp then the input device will be int
+            print("USING DDP.")
             self.ddp = True
         
-        # Data stuff first
+        # Data stuff
+        self.output = output
         self.data_dir = data_dir
         ## Get the datasets
-        train_dataset = AmznReviewsDataset(data_dir, split="train", output=output)
-        val_dataset = AmznReviewsDataset(data_dir, split="val", output=output)
-        test_dataset = AmznReviewsDataset(data_dir, split="test", output=output)
+        train_dataset = ReviewsDataset(data_dir, split="train", output=output, trim=trim)
+        val_dataset = ReviewsDataset(data_dir, split="val", output=output, trim=trim)
+        test_dataset = ReviewsDataset(data_dir, split="test", output=output) # don't trim the test dataset!
         ## Get the dataloaders
-        self.train_dataloader = AmznReviewsDataLoader(
-            train_dataset, batch_size=4, 
-            shuffle=True if self.ddp else False,
+        self.train_dataloader = ReviewsDataLoader(
+            train_dataset, batch_size=8, 
+            shuffle=False if self.ddp else True,
             sampler=DistributedSampler(train_dataset) if self.ddp else None
         )
-        self.val_dataloader = AmznReviewsDataLoader(
-            val_dataset, batch_size=4, shuffle=False,
+        self.val_dataloader = ReviewsDataLoader(
+            val_dataset, batch_size=8, shuffle=False,
             sampler=DistributedSampler(val_dataset) if self.ddp else None
         )
-        self.test_dataloader = AmznReviewsDataLoader(
-            test_dataset, batch_size=4, shuffle=False
+        self.test_dataloader = ReviewsDataLoader(
+            test_dataset, batch_size=8, shuffle=False
         )
+        # used for creating final predictions
+        self.idx2out = train_dataset.idx2out
 
         # Model stuff
         self.tokenizer = BertTokenizerFast.from_pretrained("./bert-tokenizer/")
-        self.lm = BertForSequenceClassification.from_pretrained("./bert-model/")
+        self.lm = BertForSequenceClassification.from_pretrained("./bert-model/").to(device)
         self.lm.eval()
-        self.head = torch.nn.Linear(
-            self.lm.config.hidden_size, len(train_dataset.out2idx)
-        )
+        self.head = torch.nn.Linear(self.lm.config.hidden_size, len(train_dataset.out2idx)).to(device)
         if self.ddp:
             self.lm = DDP(self.lm, device_ids=[device])
             self.head = DDP(self.head, device_ids=[device])
@@ -74,11 +77,12 @@ class Trainer:
         for param in self.lm.parameters():
             param.requires_grad = False
         self.optimizer = torch.optim.Adam(self.head.parameters(), lr=learning_rate)
+        
+        # to save results
+        if not os.path.exists("outputs/") and self.device == 0:
+            os.makedirs("outputs/")
 
     def train_step(self, batch):
-
-        # Set the model to train mode
-        self.head.train()
 
         # Tokenize the input
         inputs = self.tokenizer(
@@ -107,13 +111,10 @@ class Trainer:
         loss.backward()
         self.optimizer.step()
 
-        return loss.item()
+        return loss
 
     @torch.no_grad()
-    def eval_step(self, batch):
-
-        # Set the model to eval mode
-        self.head.eval()
+    def eval_step(self, batch, final_test=False):
 
         # Tokenize the input
         inputs = self.tokenizer(
@@ -131,7 +132,10 @@ class Trainer:
         cls_output = lm_outputs.hidden_states[-1][:, 0, :]
         out = self.head(cls_output)
 
-        loss = self.criterion(out, targets)
+        if not final_test:
+            loss = self.criterion(out, targets)
+        else:
+            loss = torch.zeros(1)
 
         outputs = torch.argmax(out, dim=1)
 
@@ -148,6 +152,8 @@ class Trainer:
 
             # Training loop
             train_loss = 0.0
+            # Set the model to train mode
+            self.head.train()
             for i, batch in tqdm(
                 enumerate(self.train_dataloader), total=len(self.train_dataloader)
             ):
@@ -155,9 +161,9 @@ class Trainer:
                 
                 # get loss from all machines if in distributed setup
                 if self.ddp:
-                    loss = dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+                    dist.all_reduce(loss, op=dist.ReduceOp.SUM)
                     
-                train_loss += loss
+                train_loss += loss.item()
 
                 if i % 10000 == 9999:
                     train_loss = 0.0
@@ -166,6 +172,8 @@ class Trainer:
 
             val_outputs = []
             val_targets = []
+            # Set the head to eval mode
+            self.head.eval()
             # Validation loop
             for batch in tqdm(self.val_dataloader, total=len(self.val_dataloader)):
                 outputs, loss = self.eval_step(batch)
@@ -213,54 +221,76 @@ class Trainer:
 
     @torch.no_grad()
     def test(self):
+        
+        # Set the model to eval mode
+        self.head.eval()
 
         test_outputs = []
-        test_targets = []
+        test_ids = [] # used for item-accuracy measurement.
         # Test loop
         for batch in tqdm(self.test_dataloader, total=len(self.test_dataloader)):
-            outputs, _ = self.eval_step(batch)
+            outputs, _ = self.eval_step(batch, final_test=True)
             test_outputs.append(outputs)
-            test_targets.append(batch["output"])
+            test_ids.append(batch["ids"])
 
         if self.ddp:
             # Prepare tensors for gathering
-            gathered_outputs = [torch.zeros_like(test_outputs) for _ in range(dist.get_world_size())]
-            gathered_targets = [torch.zeros_like(test_targets) for _ in range(dist.get_world_size())]
+            gathered_outputs = [torch.zeros(len(test_outputs)) for _ in range(dist.get_world_size())]
+            gathered_ids = [torch.zeros(len(test_ids)) for _ in range(dist.get_world_size())]
             
             # Gather tensors from all processes
             dist.all_gather(gathered_outputs, test_outputs)
-            dist.all_gather(gathered_targets, test_targets)
+            dist.all_gather(gathered_ids, test_ids)
             
             # Concatenate gathered tensors
             test_outputs = torch.cat(gathered_outputs).cpu().detach().numpy().reshape(-1)
-            test_targets = torch.cat(gathered_targets).cpu().detach().numpy().reshape(-1)
+            test_ids = torch.cat(gathered_ids).cpu().detach().numpy().reshape(-1)
             
         else:
             test_outputs = torch.cat(test_outputs).cpu().detach().numpy().reshape(-1)
-            test_targets = torch.cat(test_targets).cpu().detach().numpy().reshape(-1)
-
-        accuracy = get_accuracy(test_targets, test_outputs)
-        precision = get_precision(test_targets, test_outputs)
-        recall = get_recall(test_targets, test_outputs)
-        f1 = get_f1(test_targets, test_outputs)
+            test_ids = torch.cat(test_ids).cpu().detach().numpy().reshape(-1)
         
         if self.ddp:
             dist.barrier()
 
         if ((self.ddp and self.device == 0) or not self.ddp):
-            print(
-                f"Test Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}"
-            )
+            
+            print("Saving the final predictions for submission...")
+            if not os.path.exists("outputs/results.json"):
+                file = []                    
+                for test_id, test_out in zip(test_ids, test_outputs):
+                    cur_out = {
+                        "indoml_id": int(test_id),
+                        self.output: str(self.idx2out[test_out])
+                    }
+                    file.append(cur_out)
+            else:
+                file = json.load(open("outputs/results.json"))
+                results_dict = {item["indoml_id"]: item for item in file} # temp dict for faster access
 
+                # Iterate over the test_ids and corresponding test_outputs
+                for test_id, test_out in zip(test_ids, test_outputs):
+                    if test_id in results_dict:
+                        # Update the entry with the new output
+                        results_dict[test_id][self.output] = str(self.idx2out[test_out])
+                        
+                file = list(results_dict.values()) # only keep the values
 
-def main(rank, world_size, output="details_Brand"):
+            with open("outputs/results.json", "w") as outfile:
+                json.dump(file, outfile, indent=4)
+                    
+            print("Saved in outputs/ .")
+        
+        return
+
+            
+def DDP_wrapper(rank, world_size, output="details_Brand", trim=False):
     '''
     Wrapper for DDP.
     '''
     setup(rank, world_size)
     
-    device = f"cuda:{rank}" if torch.cuda.is_available() else "cpu"
-    trainer = Trainer(data_dir="data/", device=device, output=output)
+    trainer = Trainer(data_dir="data/", device=rank, output=output, trim=trim)
     
     trainer.train()
     trainer.test()
@@ -274,16 +304,18 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="details_Brand",
                         choices=["details_Brand", "L0_category", "L1_category", "L2_category",
                                  "L3_category", "L4_category"])
+    parser.add_argument("--debug", default=False, action='store_true')
     args = parser.parse_args()
     
     world_size = torch.cuda.device_count()
+    # DDP check.
     if world_size > 1:
         print(f"Running on {world_size} GPUs")
-        mp.spawn(main, args=(world_size, args.output), nprocs=world_size)
+        mp.spawn(DDP_wrapper, args=(world_size, args.output, args.debug), nprocs=world_size)
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Running on {device}")
-        trainer = Trainer(data_dir="data/", device=device, output=args.output)
+        trainer = Trainer(data_dir="data/", device=device, output=args.output, trim=args.debug)
         
         trainer.train()
         trainer.test()
