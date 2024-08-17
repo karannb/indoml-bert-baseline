@@ -22,7 +22,7 @@ class ReviewsDataset(Dataset):
         # Load the data
         self.data = self._load_data(data_dir, split, output)
 
-        # Load the map
+        # Load the maps
         self.out2idx, self.idx2out = self._load_map(output)
 
         # Categorize the data using the map
@@ -122,8 +122,8 @@ class ReviewsDataset(Dataset):
 def reviewCollate(batch):
 
     inputs = [example["input"] for example in batch]
-    test = "output" in batch[0].keys()
-    outputs = torch.LongTensor([example["output"] for example in batch]) if test else torch.LongTensor([[-1] for _ in batch])
+    not_test = "output" in batch[0].keys()
+    outputs = torch.LongTensor([example["output"] for example in batch]) if not_test else torch.LongTensor([[-1] for _ in batch])
     ids = torch.Tensor([example["id"] for example in batch]).to(dtype=torch.int32)
 
     return {"input": inputs, "output": outputs, "ids": ids}
@@ -142,9 +142,12 @@ class ReviewsDataLoader(DataLoader):
 
 if __name__ == '__main__':
     
-    dataset = ReviewsDataset(data_dir="data/", split="test", output="L4_category")
-    dataloader = ReviewsDataLoader(dataset, batch_size=2, shuffle=True)
+    dataset = ReviewsDataset(data_dir="data/", split="train", output="L4_category")
+    dataloader = ReviewsDataLoader(dataset, batch_size=32, shuffle=True)
     
     for batch in dataloader:
-        print(batch)
-        break
+        if any(batch['ids'] > len(dataset.out2idx)):
+            print("Found an index out of bounds.")
+            print(len(dataset.out2idx))
+            print(batch['ids'])
+            break

@@ -17,7 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12345'
+    os.environ['MASTER_PORT'] = '12346'
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -289,7 +289,7 @@ class Trainer:
                         
                 file = list(results_dict.values()) # only keep the values
 
-            with open("outputs/results.json", "w") as outfile:
+            with open(f"outputs/results_{self.output}.json", "w") as outfile:
                 json.dump(file, outfile, indent=4)
                     
             print("Saved in outputs/ .")

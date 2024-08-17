@@ -14,4 +14,4 @@ temp*
 
 # results
 *.predict
-results.json
+outputs/
