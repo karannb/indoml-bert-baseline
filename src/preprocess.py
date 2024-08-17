@@ -92,6 +92,7 @@ def categorize(attr_name: str = "details_Brand") -> None:
     
     # store as a dictionary
     col2idx = {col: idx for idx, col in enumerate(col_vals)}
+    print(f"Attribute: {attr_name} has {len(col2idx)} unique values.")
     # revert the dictionary
     idx2col = {idx: col for col, idx in col2idx.items()}
     # save

@@ -269,25 +269,13 @@ class Trainer:
         if ((self.ddp and self.device == 0) or not self.ddp):
             
             print("Saving the final predictions for submission...")
-            if not os.path.exists(f"outputs/results_{self.output}.json"):
-                file = []                    
-                for test_id, test_out in zip(test_ids, test_outputs):
-                    cur_out = {
-                        "indoml_id": int(test_id),
-                        self.output: str(self.idx2out[test_out])
-                    }
-                    file.append(cur_out)
-            else:
-                file = json.load(open("outputs/results.json"))
-                results_dict = {item["indoml_id"]: item for item in file} # temp dict for faster access
-
-                # Iterate over the test_ids and corresponding test_outputs
-                for test_id, test_out in zip(test_ids, test_outputs):
-                    if test_id in results_dict:
-                        # Update the entry with the new output
-                        results_dict[test_id][self.output] = str(self.idx2out[test_out])
-                        
-                file = list(results_dict.values()) # only keep the values
+            file = []                    
+            for test_id, test_out in zip(test_ids, test_outputs):
+                cur_out = {
+                    "indoml_id": int(test_id),
+                    self.output: str(self.idx2out[test_out])
+                }
+                file.append(cur_out)
 
             with open(f"outputs/results_{self.output}.json", "w") as outfile:
                 json.dump(file, outfile, indent=4)

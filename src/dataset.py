@@ -30,7 +30,12 @@ class ReviewsDataset(Dataset):
             print("Found 'na' as the label, removing examples with 'na' label.")
             print(f"Original data has {len(self.data)} examples.")
             self.data = self.data[self.data[output] != "na"] # remove examples with 'na' label
-            self.out2idx = {k: v for k, v in self.out2idx.items() if k != "na"} # remove 'na' from the map
+            # remove 'na' from the map by reducing everything by 1 if it is greater than the index of 'na'
+            for key in self.out2idx.keys():
+                if self.out2idx[key] > self.out2idx["na"]:
+                    self.out2idx[key] -= 1
+            del self.out2idx["na"]
+            self.idx2out = {v: k for k, v in self.out2idx.items()}
             
         if self.split != "test":
             self.data[output] = self.data[output].map(self.out2idx)
@@ -146,8 +151,8 @@ if __name__ == '__main__':
     dataloader = ReviewsDataLoader(dataset, batch_size=32, shuffle=True)
     
     for batch in dataloader:
-        if any(batch['ids'] > len(dataset.out2idx)):
+        if any(batch['output'] >= len(dataset.out2idx)) or any(batch['output'] < 0):
             print("Found an index out of bounds.")
             print(len(dataset.out2idx))
-            print(batch['ids'])
+            print(batch['output'])
             break
