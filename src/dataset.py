@@ -147,12 +147,13 @@ class ReviewsDataLoader(DataLoader):
 
 if __name__ == '__main__':
     
-    dataset = ReviewsDataset(data_dir="data/", split="train", output="L4_category")
+    dataset = ReviewsDataset(data_dir="data/", split="test", output="L0_category")
+    print(len(dataset))
     dataloader = ReviewsDataLoader(dataset, batch_size=32, shuffle=True)
     
-    for batch in dataloader:
-        if any(batch['output'] >= len(dataset.out2idx)) or any(batch['output'] < 0):
-            print("Found an index out of bounds.")
-            print(len(dataset.out2idx))
-            print(batch['output'])
-            break
+    # for batch in dataloader:
+    #     if any(batch['output'] >= len(dataset.out2idx)) or any(batch['output'] < 0):
+    #         print("Found an index out of bounds.")
+    #         print(len(dataset.out2idx))
+    #         print(batch['output'])
+    #         break
