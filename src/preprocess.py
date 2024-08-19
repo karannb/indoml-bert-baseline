@@ -53,7 +53,7 @@ def preprocess_fn(fname: str, data_dir: Optional[str] = "data") -> None:
             pattern = r'"([^"]+)":\s?(?:(\d+)|"([^"]+)")' # match key: value or key: "value"
             attrs = re.findall(pattern, line)
             for attr in attrs:
-                key = attr[0].strip().replace('\"', '') # remove " and empty spaces from key
+                key = attr[0].strip().replace('\"', '') # remove " from key
                 value = int(attr[1]) if attr[1] != '' else attr[2].strip().replace('\"', '')
                 datapoint[key] = value
             data.append(datapoint)
@@ -117,11 +117,11 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    preprocess_fn("attrebute_test.data", args.data_dir)
-    preprocess_fn("attrebute_val.data", args.data_dir)
-    preprocess_fn("attrebute_val.solution", args.data_dir)
-    preprocess_fn("attrebute_train.data", args.data_dir)
-    preprocess_fn("attrebute_train.solution", args.data_dir)
+    preprocess_fn("attribute_test.data", args.data_dir)
+    preprocess_fn("attribute_val.data", args.data_dir)
+    preprocess_fn("attribute_val.solution", args.data_dir)
+    preprocess_fn("attribute_train.data", args.data_dir)
+    preprocess_fn("attribute_train.solution", args.data_dir)
     
     for col in ['details_Brand', 'L0_category', 'L1_category', 'L2_category', 'L3_category', 'L4_category']:
         categorize(col)

@@ -29,7 +29,7 @@ def postprocess(results_dir: str = "outputs/") -> None:
     Simple function to postprocess saved reuslts to upload to 
     CodaLab.
     '''
-    
+
     # Dictionary to store the combined data
     combined_data = {}
     # Loop over all the JSON files in the directory
@@ -52,22 +52,21 @@ def postprocess(results_dir: str = "outputs/") -> None:
     # sort by indoml_id
     combined_data = dict(sorted(combined_data.items()))
 
-    out_file_name = "outputs/attrebute_test_default.predict"
+    out_file_name = "outputs/attribute_test_bert_baseline.predict" #TODO : CHANGE THE NAME!
     out_file = open(out_file_name, "w")
     for _, item in combined_data.items():
         out_file.write(json.dumps(item)+ "\n") # store as jsonl
     
     out_file.close()
-    
+
     # zip the predcition for upload
-    command = ['zip', 'outputs/default_submission.zip', out_file_name]
-    result = subprocess.run(command, capture_output=True)
+    command = ['zip', 'default_submission.zip', out_file_name.split('/')[1]] #TODO : CHANGE THE NAME!
+    result = subprocess.run(command, capture_output=True, cwd=os.path.dirname(out_file_name))
+
     if result.returncode == 0:
-        print("Zipped file, deleting the other *.predict file created...")
-        command = ["rm", out_file_name]
-        subprocess.run(command)
+        print("Zipping successful.")
     else:
-        print("Zipping failed. The *.predict is intact.")
+        print("Zipping failed.")
     
     return
 
