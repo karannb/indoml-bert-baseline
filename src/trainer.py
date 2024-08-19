@@ -4,8 +4,8 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 from transformers import BertTokenizerFast, BertForSequenceClassification
 
-from dataset import ReviewsDataset, ReviewsDataLoader
-from evaluate import get_accuracy, get_precision, get_recall, get_f1
+from src.dataset import ReviewsDataset, ReviewsDataLoader
+from src.evaluate import get_accuracy, get_precision, get_recall, get_f1
 
 # distributed setup
 import os
@@ -199,8 +199,8 @@ class Trainer:
                 val_targets = torch.cat(gathered_targets).cpu().detach().numpy().reshape(-1)
             
             else:    
-                val_outputs = torch.cat(val_outputs).cpu().detach().numpy().reshape(-1)
-                val_targets = torch.cat(val_targets).cpu().detach().numpy().reshape(-1)
+                val_outputs = val_outputs.cpu().detach().numpy().reshape(-1)
+                val_targets = val_targets.cpu().detach().numpy().reshape(-1)
 
             accuracy = get_accuracy(val_targets, val_outputs)
             precision = get_precision(val_targets, val_outputs)
@@ -260,8 +260,8 @@ class Trainer:
             test_ids = torch.cat(gathered_ids).cpu().detach().numpy().reshape(-1)
             
         else:
-            test_outputs = torch.cat(test_outputs).cpu().detach().numpy().reshape(-1)
-            test_ids = torch.cat(test_ids).cpu().detach().numpy().reshape(-1)
+            test_outputs = test_outputs.cpu().detach().numpy().reshape(-1)
+            test_ids = test_ids.cpu().detach().numpy().reshape(-1)
         
         if self.ddp:
             dist.barrier()
