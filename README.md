@@ -1,4 +1,4 @@
-# indoml-bert-baseline
+# BERT based Starter Kit for IndoML'24 DataThon
 
 A simple BERT based baseline for DataThon @ [IndoML'24](https://sites.google.com/view/datathon-indoml24), [![colab_logo](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/karannb/indoml-bert-baseline/blob/main/tutorial.ipynb).
 
