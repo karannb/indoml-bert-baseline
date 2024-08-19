@@ -104,7 +104,7 @@ def categorize(attr_name: str = "details_Brand") -> None:
     with open(f'data/maps/idx2{attr_name}.pkl', 'wb') as f:
         pickle.dump(idx2col, f)
 
-    print(f'Categorized {col}.')
+    print(f'Categorized {attr_name}.')
     return
 
 
